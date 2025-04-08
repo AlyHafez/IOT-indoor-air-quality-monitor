@@ -18,10 +18,9 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-
+#include "stdio.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "stdio.h"
 
 /* USER CODE END Includes */
 
@@ -32,16 +31,14 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define CO2_SENSOR_ADDRESS 0x28<<1
-#define CO2_SENSOR_STATUS 0x01
-#define CO2_MSB_RATE 0x02
-#define CO2_LSB_RATE 0x03
+#define CO2_ADDRESS 0x28
+#define CO2_MEAS_RATE_H 0x02
+#define CO2_MEAS_RATE_L 0x03
 #define CO2_CONFIG 0x04
-#define CO2_MSB 0x05
-#define CO2_LSB 0x06
+#define CO2_PPM_H 0x05
+#define CO2_PPM_L 0x06
 
-#define PM_25_ADDRESS 0x33<<1
-#define PM_25_SENSOR_STATUS 0X26
+#define PM25_ADDRESS 0x33<<1
 #define PM_25_LL 0x04
 #define PM_25_LH 0x05
 #define PM_25_HL 0x06
@@ -68,18 +65,20 @@
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_USART2_UART_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_I2C1_Init(void);
 static void MX_I2C3_Init(void);
 static void MX_USART1_UART_Init(void);
 /* USER CODE BEGIN PFP */
-void PERIOD_INIT(void);
-void MODE_CONFIG(void);
-void SENSOR_STATUS_CHECK(void);
-uint16_t get_CO2(void);
 void send_data_USART(char* data);
+void period_INIT(void);
+void CONFIG(void);
+uint16_t get_CO2(void);
 void I2C_Scan(void);
+void I2C_Scan_I2C3();
 uint16_t get_PM25(void);
+
 float get_ADC_voltage();
 int CalculatePPM(float voltage);
 uint16_t calculateChecksum(uint16_t *data);
@@ -123,39 +122,61 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_USART2_UART_Init();
   MX_ADC1_Init();
   MX_I2C1_Init();
   MX_I2C3_Init();
   MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
-  PERIOD_INIT();
-  MODE_CONFIG();
-  SENSOR_STATUS_CHECK();
+  LL_mDelay(1000);  // Wait for sensor to power up
+  LL_ADC_Enable(ADC1);
+  while (!LL_ADC_IsEnabled(ADC1));
+  //send_data_USART("Scanning I2C3...\n");
+ //I2C_Scan_I2C3();
+ //send_data_USART("Running I2C scan...\n");
+
+  //send_data_USART("Scan complete.\n");
+
+  //CONFIG();
+  //period_INIT();
+
+
+
+
+  LL_mDelay(100);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+  LL_mDelay(8000);
   while (1)
   {
 
-	  uint16_t CO2 = get_CO2();
-
-
-
-
 	  uint16_t PM25 = get_PM25();
 
-	  float Voltage = get_ADC_voltage();
-	  int CO_value = CalculatePPM(Voltage);
-	  uint16_t data[3]={CO2, CO_value,PM25};
+	  float voltage = get_ADC_voltage();
+	  int mv = (int)(voltage*1000);
+	  int CO = CalculatePPM(voltage);
+	  //send_data_USART("helloo\n");
 
+
+
+	  uint16_t data[2] = {CO, PM25};
 	  uint16_t checksum = calculateChecksum(data);
+	  char buffer1[150];
+	  sprintf(buffer1,"CO: %u\nPM25: %u\n checksum: %u\n",data[0], data[1], checksum);
+	  send_data_USART(buffer1);
+	 LL_mDelay(60000);
 
 
-	  char buffer[150];
-	  sprintf(buffer, "CO2: %d ppm\n CO:%d ppm\n PM2.5:%d ug/m^3\n Checksum: %d\n",data[0], data[1],data[2],checksum);
-	  send_data_USART(buffer);
-	  LL_mDelay(10000);
+	  /*uint16_t CO2_PPM = get_CO2();
+
+	  char buffer[50];
+	  sprintf(buffer, "CO2: %u PPM\n", CO2_PPM);
+	  send_data_USART(buffer);*/
+
+	  //LL_mDelay(10000);
+
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -439,6 +460,57 @@ static void MX_USART1_UART_Init(void)
 }
 
 /**
+  * @brief USART2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART2_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART2_Init 0 */
+
+  /* USER CODE END USART2_Init 0 */
+
+  LL_USART_InitTypeDef USART_InitStruct = {0};
+
+  LL_GPIO_InitTypeDef GPIO_InitStruct = {0};
+
+  /* Peripheral clock enable */
+  LL_APB1_GRP1_EnableClock(LL_APB1_GRP1_PERIPH_USART2);
+
+  LL_AHB1_GRP1_EnableClock(LL_AHB1_GRP1_PERIPH_GPIOA);
+  /**USART2 GPIO Configuration
+  PA2   ------> USART2_TX
+  PA3   ------> USART2_RX
+  */
+  GPIO_InitStruct.Pin = USART_TX_Pin|USART_RX_Pin;
+  GPIO_InitStruct.Mode = LL_GPIO_MODE_ALTERNATE;
+  GPIO_InitStruct.Speed = LL_GPIO_SPEED_FREQ_LOW;
+  GPIO_InitStruct.OutputType = LL_GPIO_OUTPUT_PUSHPULL;
+  GPIO_InitStruct.Pull = LL_GPIO_PULL_NO;
+  GPIO_InitStruct.Alternate = LL_GPIO_AF_7;
+  LL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /* USER CODE BEGIN USART2_Init 1 */
+
+  /* USER CODE END USART2_Init 1 */
+  USART_InitStruct.BaudRate = 115200;
+  USART_InitStruct.DataWidth = LL_USART_DATAWIDTH_8B;
+  USART_InitStruct.StopBits = LL_USART_STOPBITS_1;
+  USART_InitStruct.Parity = LL_USART_PARITY_NONE;
+  USART_InitStruct.TransferDirection = LL_USART_DIRECTION_TX_RX;
+  USART_InitStruct.HardwareFlowControl = LL_USART_HWCONTROL_NONE;
+  USART_InitStruct.OverSampling = LL_USART_OVERSAMPLING_16;
+  LL_USART_Init(USART2, &USART_InitStruct);
+  LL_USART_ConfigAsyncMode(USART2);
+  LL_USART_Enable(USART2);
+  /* USER CODE BEGIN USART2_Init 2 */
+
+  /* USER CODE END USART2_Init 2 */
+
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -476,15 +548,6 @@ static void MX_GPIO_Init(void)
   LL_GPIO_SetPinMode(B1_GPIO_Port, B1_Pin, LL_GPIO_MODE_INPUT);
 
   /**/
-  GPIO_InitStruct.Pin = USART_TX_Pin|USART_RX_Pin;
-  GPIO_InitStruct.Mode = LL_GPIO_MODE_ALTERNATE;
-  GPIO_InitStruct.Speed = LL_GPIO_SPEED_FREQ_LOW;
-  GPIO_InitStruct.OutputType = LL_GPIO_OUTPUT_PUSHPULL;
-  GPIO_InitStruct.Pull = LL_GPIO_PULL_NO;
-  GPIO_InitStruct.Alternate = LL_GPIO_AF_7;
-  LL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
-  /**/
   GPIO_InitStruct.Pin = LD2_Pin;
   GPIO_InitStruct.Mode = LL_GPIO_MODE_OUTPUT;
   GPIO_InitStruct.Speed = LL_GPIO_SPEED_FREQ_LOW;
@@ -497,6 +560,101 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+uint16_t calculateChecksum(uint16_t *data){
+
+	uint32_t sum = 0;
+
+	for (size_t i=0;i<2;i++){
+		sum+=data[i];
+
+		if(sum>=0x10000){
+			sum = (sum&0xFFFF) + 1;
+		}
+	}
+	return ~((uint16_t) sum);
+}
+
+
+
+void I2C_Scan_I2C3() {
+    char msg[32];
+    for (uint8_t addr = 1; addr < 128; addr++) {
+        LL_I2C_GenerateStartCondition(I2C3);
+        while (!LL_I2C_IsActiveFlag_SB(I2C3));
+
+        LL_I2C_TransmitData8(I2C3, addr << 1);
+        LL_mDelay(2);
+
+        if (LL_I2C_IsActiveFlag_ADDR(I2C3)) {
+            LL_I2C_ClearFlag_ADDR(I2C3);
+            sprintf(msg, "I2C3 device at: 0x%02X\n", addr);
+            send_data_USART(msg);
+        }
+
+        LL_I2C_GenerateStopCondition(I2C3);
+        LL_mDelay(5);
+    }
+}
+void I2C_Scan(void) {
+    char buf[32];
+    for (uint8_t i = 1; i < 128; i++) {
+        LL_I2C_GenerateStartCondition(I2C1);
+        while (!LL_I2C_IsActiveFlag_SB(I2C1));
+        LL_I2C_TransmitData8(I2C1, i << 1);
+        LL_mDelay(1);
+        if (LL_I2C_IsActiveFlag_ADDR(I2C1)) {
+            LL_I2C_ClearFlag_ADDR(I2C1);
+            sprintf(buf, "Found: 0x%02X\n", i);
+            send_data_USART(buf);
+        }
+        LL_I2C_GenerateStopCondition(I2C1);
+        LL_mDelay(5);
+    }
+}
+
+uint16_t get_PM25(){
+    uint8_t PM_data[4] = {0};
+
+    // Step 1: Set register address (start at 0x04)
+    LL_I2C_GenerateStartCondition(I2C3);
+    while (!LL_I2C_IsActiveFlag_SB(I2C3));
+
+    LL_I2C_TransmitData8(I2C3, PM25_ADDRESS); // 0x66 = 0x33<<1
+    while (!LL_I2C_IsActiveFlag_ADDR(I2C3));
+    LL_I2C_ClearFlag_ADDR(I2C3);
+
+    LL_I2C_TransmitData8(I2C3, PM_25_LL); // Start at 0x04
+    while (!LL_I2C_IsActiveFlag_TXE(I2C3));
+
+    // Step 2: Repeated Start + Read 4 bytes
+    LL_I2C_GenerateStartCondition(I2C3);
+    while (!LL_I2C_IsActiveFlag_SB(I2C3));
+
+    LL_I2C_TransmitData8(I2C3, PM25_ADDRESS | 0x01); // 0x67
+    while (!LL_I2C_IsActiveFlag_ADDR(I2C3));
+    LL_I2C_ClearFlag_ADDR(I2C3);
+
+    for (int i = 0; i < 4; i++) {
+        if (i < 3) {
+            LL_I2C_AcknowledgeNextData(I2C3, LL_I2C_ACK);
+        } else {
+            LL_I2C_AcknowledgeNextData(I2C3, LL_I2C_NACK);
+        }
+
+        while (!LL_I2C_IsActiveFlag_RXNE(I2C3));
+        PM_data[i] = LL_I2C_ReceiveData8(I2C3);
+    }
+
+    LL_I2C_GenerateStopCondition(I2C3);
+
+    // Step 3: Combine bytes into 32-bit value
+    uint32_t full_value = (PM_data[3] << 24) | (PM_data[2] << 16) |
+                          (PM_data[1] << 8) | PM_data[0];
+
+    // Return lower 16 bits (PM2.5 in µg/m³) — you can change to full_value if needed
+    return (uint16_t)(full_value & 0xFFFF);
+}
+
 void send_data_USART(char* data){
 	while (*data) {
 
@@ -510,321 +668,135 @@ void send_data_USART(char* data){
 
 }
 
-void SENSOR_STATUS_CHECK(){
-	LL_I2C_GenerateStartCondition(I2C1);
-	while (!LL_I2C_IsActiveFlag_SB(I2C1));  // Wait for start condition
+void CONFIG(){
+	LL_I2C_GenerateStartCondition(I2C3);
+	while (!LL_I2C_IsActiveFlag_SB(I2C3));
 
-	LL_I2C_TransmitData8(I2C1, (CO2_SENSOR_ADDRESS));
-	while(!LL_I2C_IsActiveFlag_ADDR(I2C1));
-	LL_I2C_ClearFlag_ADDR(I2C1);
+	LL_I2C_TransmitData8(I2C3, (CO2_ADDRESS<<1));
+	while(!LL_I2C_IsActiveFlag_ADDR(I2C3));
+	LL_I2C_ClearFlag_ADDR(I2C3);
 
-	LL_I2C_TransmitData8(I2C1, CO2_SENSOR_STATUS);
-	while(!LL_I2C_IsActiveFlag_TXE(I2C1));
+	LL_I2C_TransmitData8(I2C3,CO2_CONFIG);
+	while(!LL_I2C_IsActiveFlag_TXE(I2C3));
 
-	LL_I2C_GenerateStartCondition(I2C1);
-	while (!LL_I2C_IsActiveFlag_SB(I2C1));
+	LL_I2C_TransmitData8(I2C3, 0x02);
+	while(!LL_I2C_IsActiveFlag_TXE(I2C3));
 
-	LL_I2C_TransmitData8(I2C1, (CO2_SENSOR_ADDRESS)|0x01);
-	while(!LL_I2C_IsActiveFlag_ADDR(I2C1));
-	LL_I2C_ClearFlag_ADDR(I2C1);
-
-	LL_I2C_AcknowledgeNextData(I2C1, LL_I2C_NACK);
-	while(!LL_I2C_IsActiveFlag_RXNE(I2C1));
-
-	uint8_t status = LL_I2C_ReceiveData8(I2C1);
-	LL_I2C_GenerateStopCondition(I2C1);
-
-	char buffer_3[30];
-	sprintf(buffer_3, "status:%d\n", status);
-
-
-
+	LL_I2C_GenerateStopCondition(I2C3);
 
 }
-void PERIOD_INIT(){
-	LL_I2C_GenerateStartCondition(I2C1);
-	while (!LL_I2C_IsActiveFlag_SB(I2C1));
 
-	LL_I2C_TransmitData8(I2C1, (CO2_SENSOR_ADDRESS));
-	while(!LL_I2C_IsActiveFlag_ADDR(I2C1));
-	LL_I2C_ClearFlag_ADDR(I2C1);
+void period_INIT(){
+	LL_I2C_GenerateStartCondition(I2C3);
+	while (!LL_I2C_IsActiveFlag_SB(I2C3));
 
-	LL_I2C_TransmitData8(I2C1, CO2_MSB_RATE);
-	while(!LL_I2C_IsActiveFlag_TXE(I2C1));
+	LL_I2C_TransmitData8(I2C3, (CO2_ADDRESS<<1));
+	while(!LL_I2C_IsActiveFlag_ADDR(I2C3));
+	LL_I2C_ClearFlag_ADDR(I2C3);
 
-	LL_I2C_TransmitData8(I2C1, 0x00);
-	while(!LL_I2C_IsActiveFlag_TXE(I2C1));
+	LL_I2C_TransmitData8(I2C3,CO2_MEAS_RATE_H);
+	while(!LL_I2C_IsActiveFlag_TXE(I2C3));
 
-	LL_I2C_GenerateStartCondition(I2C1);
-	while (!LL_I2C_IsActiveFlag_SB(I2C1));
+	LL_I2C_TransmitData8(I2C3,0x00);
+	while(!LL_I2C_IsActiveFlag_TXE(I2C3));
 
-	LL_I2C_TransmitData8(I2C1, (CO2_SENSOR_ADDRESS));
-	while(!LL_I2C_IsActiveFlag_ADDR(I2C1));
-	LL_I2C_ClearFlag_ADDR(I2C1);
+	LL_I2C_GenerateStartCondition(I2C3);
+	while (!LL_I2C_IsActiveFlag_SB(I2C3));
 
-	LL_I2C_TransmitData8(I2C1, CO2_LSB_RATE);
-	while(!LL_I2C_IsActiveFlag_TXE(I2C1));
+	LL_I2C_TransmitData8(I2C3, (CO2_ADDRESS<<1));
+	while(!LL_I2C_IsActiveFlag_ADDR(I2C3));
+	LL_I2C_ClearFlag_ADDR(I2C3);
 
-	LL_I2C_TransmitData8(I2C1, 0x0A);
-	while(!LL_I2C_IsActiveFlag_TXE(I2C1));
+	LL_I2C_TransmitData8(I2C3,CO2_MEAS_RATE_L);
+	while(!LL_I2C_IsActiveFlag_TXE(I2C3));
 
-	LL_I2C_GenerateStopCondition(I2C1);
-}
+	LL_I2C_TransmitData8(I2C3,0x0A);
+	while(!LL_I2C_IsActiveFlag_TXE(I2C3));
 
-void MODE_CONFIG(){
-	LL_I2C_GenerateStartCondition(I2C1);
-	while (!LL_I2C_IsActiveFlag_SB(I2C1));
+	LL_I2C_GenerateStopCondition(I2C3);
 
-	LL_I2C_TransmitData8(I2C1, (CO2_SENSOR_ADDRESS));
-	while(!LL_I2C_IsActiveFlag_ADDR(I2C1));
-	LL_I2C_ClearFlag_ADDR(I2C1);
-
-	LL_I2C_TransmitData8(I2C1, CO2_CONFIG);
-	while(!LL_I2C_IsActiveFlag_TXE(I2C1));
-
-	LL_I2C_TransmitData8(I2C1, 0x06);
-	while(!LL_I2C_IsActiveFlag_TXE(I2C1));
-
-	LL_I2C_GenerateStopCondition(I2C1);
 
 }
 
 uint16_t get_CO2(){
 	uint8_t MSB = 0;
 	uint8_t LSB =0;
-	LL_I2C_GenerateStartCondition(I2C1);
-	while (!LL_I2C_IsActiveFlag_SB(I2C1));
+	uint16_t CO2 = 0;
+	LL_I2C_GenerateStartCondition(I2C3);
+	while (!LL_I2C_IsActiveFlag_SB(I2C3));
 
-	LL_I2C_TransmitData8(I2C1, (CO2_SENSOR_ADDRESS));
-	while(!LL_I2C_IsActiveFlag_ADDR(I2C1));
-	LL_I2C_ClearFlag_ADDR(I2C1);
+	LL_I2C_TransmitData8(I2C3, (CO2_ADDRESS<<1));
+	while(!LL_I2C_IsActiveFlag_ADDR(I2C3));
+	LL_I2C_ClearFlag_ADDR(I2C3);
 
-	LL_I2C_TransmitData8(I2C1, CO2_MSB);
-	while(!LL_I2C_IsActiveFlag_TXE(I2C1));
+	LL_I2C_TransmitData8(I2C3, CO2_PPM_H);
+	while(!LL_I2C_IsActiveFlag_TXE(I2C3));
 
-	LL_I2C_GenerateStartCondition(I2C1);
-	while (!LL_I2C_IsActiveFlag_SB(I2C1));
+	LL_I2C_GenerateStartCondition(I2C3);
+	while (!LL_I2C_IsActiveFlag_SB(I2C3));
 
-	LL_I2C_TransmitData8(I2C1, (CO2_SENSOR_ADDRESS)|0x01);
-	while(!LL_I2C_IsActiveFlag_ADDR(I2C1));
-	LL_I2C_ClearFlag_ADDR(I2C1);
+	LL_I2C_TransmitData8(I2C3, (CO2_ADDRESS<<1)|0x01);
+	while(!LL_I2C_IsActiveFlag_ADDR(I2C3));
+	LL_I2C_ClearFlag_ADDR(I2C3);
 
-	LL_I2C_AcknowledgeNextData(I2C1, LL_I2C_NACK);
-	while(!LL_I2C_IsActiveFlag_RXNE(I2C1));
+	LL_I2C_AcknowledgeNextData(I2C3, LL_I2C_NACK);
+	while(!LL_I2C_IsActiveFlag_RXNE(I2C3));
 
-	MSB = LL_I2C_ReceiveData8(I2C1);
+	MSB = LL_I2C_ReceiveData8(I2C3);
 
-	LL_I2C_GenerateStartCondition(I2C1);
-	while (!LL_I2C_IsActiveFlag_SB(I2C1));
+	LL_I2C_GenerateStartCondition(I2C3);
+	while (!LL_I2C_IsActiveFlag_SB(I2C3));
 
-	LL_I2C_TransmitData8(I2C1, (CO2_SENSOR_ADDRESS));
-	while(!LL_I2C_IsActiveFlag_ADDR(I2C1));
-	LL_I2C_ClearFlag_ADDR(I2C1);
+	LL_I2C_TransmitData8(I2C3, (CO2_ADDRESS<<1));
+	while(!LL_I2C_IsActiveFlag_ADDR(I2C3));
+	LL_I2C_ClearFlag_ADDR(I2C3);
 
-	LL_I2C_TransmitData8(I2C1, CO2_LSB);
-	while(!LL_I2C_IsActiveFlag_TXE(I2C1));
+	LL_I2C_TransmitData8(I2C3, CO2_PPM_L);
+	while(!LL_I2C_IsActiveFlag_TXE(I2C3));
 
-	LL_I2C_GenerateStartCondition(I2C1);
-	while (!LL_I2C_IsActiveFlag_SB(I2C1));
+	LL_I2C_GenerateStartCondition(I2C3);
+	while (!LL_I2C_IsActiveFlag_SB(I2C3));
 
-	LL_I2C_TransmitData8(I2C1, (CO2_SENSOR_ADDRESS)|0x01);
-	while(!LL_I2C_IsActiveFlag_ADDR(I2C1));
-	LL_I2C_ClearFlag_ADDR(I2C1);
+	LL_I2C_TransmitData8(I2C3, (CO2_ADDRESS<<1)|0x01);
+	while(!LL_I2C_IsActiveFlag_ADDR(I2C3));
+	LL_I2C_ClearFlag_ADDR(I2C3);
 
-	LL_I2C_AcknowledgeNextData(I2C1, LL_I2C_NACK);
-	while(!LL_I2C_IsActiveFlag_RXNE(I2C1));
+	LL_I2C_AcknowledgeNextData(I2C3, LL_I2C_NACK);
+	while(!LL_I2C_IsActiveFlag_RXNE(I2C3));
 
-	LSB = LL_I2C_ReceiveData8(I2C1);
+	LSB = LL_I2C_ReceiveData8(I2C3);
 
-	LL_I2C_GenerateStopCondition(I2C1);
-	char buffer41[30];
-	sprintf(buffer41, "\nMSB:0x%02X      LSB: 0x%02X\n", MSB, LSB);
+	LL_I2C_GenerateStopCondition(I2C3);
 
+	CO2 = (uint16_t)((MSB<<8)|LSB);
 
-
-	uint16_t CO2 = (uint16_t)((MSB<<8)|LSB);
 	return CO2;
 
 }
 
-uint16_t get_PM25(){
-	uint8_t LL = 0;
-	uint8_t LH = 0;
-	uint8_t HL = 0;
-	uint8_t HH = 0;
-
-	LL_I2C_GenerateStartCondition(I2C3);
-	while (!LL_I2C_IsActiveFlag_SB(I2C3));
-
-	LL_I2C_TransmitData8(I2C3, (PM_25_ADDRESS));//write to pm2.5 address
-	while(!LL_I2C_IsActiveFlag_ADDR(I2C3));
-	LL_I2C_ClearFlag_ADDR(I2C3);
-
-	LL_I2C_TransmitData8(I2C3, (PM_25_LL));
-	while(!LL_I2C_IsActiveFlag_TXE(I2C3));
-
-	LL_I2C_GenerateStartCondition(I2C3);
-	while (!LL_I2C_IsActiveFlag_SB(I2C3));
-
-	LL_I2C_TransmitData8(I2C3, (PM_25_ADDRESS)|0x01);
-	while(!LL_I2C_IsActiveFlag_ADDR(I2C3));
-	LL_I2C_ClearFlag_ADDR(I2C3);
-
-	LL_mDelay(1);
-
-	LL_I2C_AcknowledgeNextData(I2C3, LL_I2C_NACK);
-	while(!LL_I2C_IsActiveFlag_RXNE(I2C3));
-
-	LL = LL_I2C_ReceiveData8(I2C3);
-
-	LL_I2C_GenerateStartCondition(I2C3);
-	while (!LL_I2C_IsActiveFlag_SB(I2C3));
-
-	LL_I2C_TransmitData8(I2C3, (PM_25_ADDRESS));//write to pm2.5 address
-	while(!LL_I2C_IsActiveFlag_ADDR(I2C3));
-	LL_I2C_ClearFlag_ADDR(I2C3);
-
-	LL_I2C_TransmitData8(I2C3, (PM_25_LH));
-	while(!LL_I2C_IsActiveFlag_TXE(I2C3));
-
-	LL_I2C_GenerateStartCondition(I2C3);
-	while (!LL_I2C_IsActiveFlag_SB(I2C3));
-
-	LL_I2C_TransmitData8(I2C3, (PM_25_ADDRESS)|0x01);
-	while(!LL_I2C_IsActiveFlag_ADDR(I2C3));
-	LL_I2C_ClearFlag_ADDR(I2C3);
-
-	LL_mDelay(1);
-
-	LL_I2C_AcknowledgeNextData(I2C3, LL_I2C_NACK);
-	while(!LL_I2C_IsActiveFlag_RXNE(I2C3));
-
-	LH = LL_I2C_ReceiveData8(I2C3);
-
-
-	LL_I2C_GenerateStartCondition(I2C3);
-	while (!LL_I2C_IsActiveFlag_SB(I2C3));
-
-	LL_I2C_TransmitData8(I2C3, (PM_25_ADDRESS));//write to pm2.5 address
-	while(!LL_I2C_IsActiveFlag_ADDR(I2C3));
-	LL_I2C_ClearFlag_ADDR(I2C3);
-
-	LL_I2C_TransmitData8(I2C3, (PM_25_HL));
-	while(!LL_I2C_IsActiveFlag_TXE(I2C3));
-
-	LL_I2C_GenerateStartCondition(I2C3);
-	while (!LL_I2C_IsActiveFlag_SB(I2C3));
-
-	LL_I2C_TransmitData8(I2C3, (PM_25_ADDRESS)|0x01);
-	while(!LL_I2C_IsActiveFlag_ADDR(I2C3));
-	LL_I2C_ClearFlag_ADDR(I2C3);
-
-	LL_mDelay(1);
-
-	LL_I2C_AcknowledgeNextData(I2C3, LL_I2C_NACK);
-	while(!LL_I2C_IsActiveFlag_RXNE(I2C3));
-
-	HL = LL_I2C_ReceiveData8(I2C3);
-
-	LL_I2C_GenerateStartCondition(I2C3);
-	while (!LL_I2C_IsActiveFlag_SB(I2C3));
-
-	LL_I2C_TransmitData8(I2C3, (PM_25_ADDRESS));//write to pm2.5 address
-	while(!LL_I2C_IsActiveFlag_ADDR(I2C3));
-	LL_I2C_ClearFlag_ADDR(I2C3);
-
-	LL_I2C_TransmitData8(I2C3, (PM_25_HH));
-	while(!LL_I2C_IsActiveFlag_TXE(I2C3));
-
-	LL_I2C_GenerateStartCondition(I2C3);
-	while (!LL_I2C_IsActiveFlag_SB(I2C3));
-
-	LL_I2C_TransmitData8(I2C3, (PM_25_ADDRESS)|0x01);
-	while(!LL_I2C_IsActiveFlag_ADDR(I2C3));
-	LL_I2C_ClearFlag_ADDR(I2C3);
-
-	LL_mDelay(1);
-
-	LL_I2C_AcknowledgeNextData(I2C3, LL_I2C_NACK);
-	while(!LL_I2C_IsActiveFlag_RXNE(I2C3));
-
-	HH = LL_I2C_ReceiveData8(I2C3);
-	LL_I2C_GenerateStopCondition(I2C3);
-
-	uint32_t conversion = (HH<<24)|(HL<<16)|(LH<<8)|(LL);
-	uint16_t PM_25= conversion&0xFFFF;
-
-	return PM_25;
-
-}
-
 float get_ADC_voltage(){
+
+
+
+
+
 	 LL_ADC_REG_StartConversionSWStart(ADC1);
-    // Wait until conversion is complete
+   // Wait until conversion is complete
 	 while (!LL_ADC_IsActiveFlag_EOCS(ADC1));
 	 LL_ADC_ClearFlag_EOCS(ADC1);
-    // Read ADC value (12-bit)
-    uint16_t adc_value = LL_ADC_REG_ReadConversionData12(ADC1);
+   // Read ADC value (12-bit)
+   uint16_t adc_value = LL_ADC_REG_ReadConversionData12(ADC1);
 
-    // Convert to voltage (0 - 3.3V)
-    return (adc_value / 4095.0f) * 3.3f;
+   // Convert to voltage (0 - 3.3V)
+   return (adc_value/4095.0f) * 3.3f;
 }
 
 int CalculatePPM(float voltage){
 	float current = voltage/resistor;
-	return (int)(current/sensitivity);
+
+	int CO = current/sensitivity;
+	return CO;
 }
-
-void I2C_Scan(void)
-{
-    char buffer4[50];
-    uint8_t address;
-    uint8_t devices_found = 0;
-
-    for (address = 1; address < 128; address++)  // I2C addresses range from 0x01 to 0x7F
-    {
-        LL_I2C_GenerateStartCondition(I2C1);
-        while (!LL_I2C_IsActiveFlag_SB(I2C1));  // Wait for start condition
-
-        LL_I2C_TransmitData8(I2C1, (address << 1));  // Transmit the address in write mode
-        LL_mDelay(1);
-
-        if (LL_I2C_IsActiveFlag_ADDR(I2C1))  // If the address is acknowledged
-        {
-            LL_I2C_ClearFlag_ADDR(I2C1);
-            sprintf(buffer4, "Device found at 0x%02X\n", address);
-
-            devices_found++;
-        }
-
-        LL_I2C_GenerateStopCondition(I2C1);  // Stop condition
-        LL_mDelay(10);  // Short delay to avoid bus conflicts
-    }
-
-    if (devices_found == 0)
-    {
-
-    }
-    else
-    {
-        sprintf(buffer4, "Total devices found: %d\n", devices_found);
-
-    }
-}
-uint16_t calculateChecksum(uint16_t *data){
-
-	uint32_t sum = 0;
-
-	for (size_t i=0;i<3;i++){
-		sum+=data[i];
-
-		if(sum>=0x10000){
-			sum = (sum&0xFFFF) + 1;
-		}
-	}
-	return ~((uint16_t) sum);
-}
-
 /* USER CODE END 4 */
 
 /**
